@@ -1,0 +1,143 @@
+import streamlit as st
+from pathlib import Path
+import time
+from streamlit_autorefresh import st_autorefresh
+
+# Define the folder path where files will be saved
+save_folder = Path("files")  # Change if your folder path is different
+save_folder.mkdir(exist_ok=True)  # Create the folder if it doesn't exist
+
+# Initialize timer session state variables
+if 'timer_running' not in st.session_state:
+    st.session_state.timer_running = False
+if 'start_time' not in st.session_state:
+    st.session_state.start_time = None
+if 'elapsed_time' not in st.session_state:
+    st.session_state.elapsed_time = 0
+if 'exam_duration' not in st.session_state:
+    st.session_state.exam_duration = 120  # 2 minutes in seconds
+
+# Page Navigation State
+if "page" not in st.session_state:
+    st.session_state["page"] = "login"  # Start with the login page
+
+# Timer functions
+def start_timer():
+    st.session_state.timer_running = True
+    st.session_state.start_time = time.time() - st.session_state.elapsed_time
+
+def stop_timer():
+    st.session_state.timer_running = False
+    st.session_state.elapsed_time = time.time() - st.session_state.start_time
+
+# Page 1: Login Page
+if st.session_state["page"] == "login":
+    st.title("Student Login")
+    # Input fields for name, email, and class
+    name = st.text_input("Student Name")
+    email = st.text_input("Email ID")
+    student_class = st.selectbox("Class", [7, 8, 9, 10, 11, 12])
+    
+    # Login button
+    if st.button("Submit"):
+        # Check if all fields are filled
+        if name and email and student_class:
+            # Store the data in session state to use across pages
+            st.session_state["name"] = name
+            st.session_state["email"] = email
+            st.session_state["class"] = student_class
+            st.session_state["page"] = "next"
+            st.success(f"Login successful! Welcome, {name} from class {student_class}.")
+        else:
+            st.error("Please enter your name, email, and class.")
+
+# Show the "Next Page" button after successful login
+if st.session_state.get("page") == "next":
+    if st.button("Next Page"):
+        st.session_state["page"] = "main"
+        # Start timer automatically when entering main page
+        start_timer()
+
+# Page 2: Main Page (with timer)
+if st.session_state["page"] == "main":
+    st.title("Welcome to Your Test Page")
+    
+    # Create columns with spacing to position the timer further to the right
+    main_col, _, timer_col = st.columns([2, 1, 1])
+    
+    with main_col:
+        # Section 1: Question Paper Download
+        st.subheader("Download Question Paper")
+        with open(save_folder / "10CBSE_Test1_50marks_QuestionPaper.pdf", "rb") as file:
+            question_paper = file.read()
+        st.download_button(
+            label="DOWNLOAD QUESTION PAPER",
+            data=question_paper,
+            file_name="10CBSE_Test1_50marks_QuestionPaper.pdf",
+            mime="application/pdf"
+        )
+
+        # Section 2: Answer Sheet Upload, disabled if time has expired
+        st.subheader("Upload Your Answer Sheet")
+        remaining_time = max(st.session_state.exam_duration - st.session_state.elapsed_time, 0)
+        
+        upload_disabled = remaining_time <= 0
+        uploaded_file = st.file_uploader("Choose a PDF file to upload your answer sheet", type="pdf", key="answer_upload", disabled=upload_disabled)
+        
+        if uploaded_file and not upload_disabled:
+            student_name = st.session_state["name"].replace(" ", "_")
+            student_class = st.session_state["class"]
+            filename = f"{student_name}_{student_class}.pdf"
+            
+            # Save the file to the specified folder
+            with open(save_folder / filename, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            
+            st.success(f"Answer sheet uploaded successfully and saved as '{filename}'")
+            
+            # Stop the timer when the answer sheet is uploaded
+            stop_timer()
+            
+            # Show the "Download Solutions" button after upload
+            st.subheader("Download Solutions")
+            with open(save_folder / "10CBSE_Test1_50marks_Solutions.pdf", "rb") as file:
+                solutions = file.read()
+            st.download_button(
+                label="DOWNLOAD SOLUTIONS",
+                data=solutions,
+                file_name="10CBSE_Test1_50marks_Solutions.pdf",
+                mime="application/pdf"
+            )
+
+    with timer_col:
+        st.subheader("Exam Timer")
+        # Update timer if running
+        if st.session_state.timer_running:
+            st.session_state.elapsed_time = time.time() - st.session_state.start_time
+        
+        # Calculate remaining time
+        remaining_time = max(st.session_state.exam_duration - st.session_state.elapsed_time, 0)
+        minutes = int(remaining_time // 60)
+        seconds = int(remaining_time % 60)
+        
+        # Display timer with different colors based on remaining time
+        time_str = f"{minutes:02d}:{seconds:02d}"
+        if remaining_time <= 10:  # Last 10 seconds
+            st.markdown(f"<h2 style='color: red;'>⏱️ {time_str}</h2>", unsafe_allow_html=True)
+        elif remaining_time <= 30:  # Last 30 seconds
+            st.markdown(f"<h2 style='color: orange;'>⏱️ {time_str}</h2>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<h2>⏱️ {time_str}</h2>", unsafe_allow_html=True)
+        
+        # Show warning when time is running low
+        if remaining_time <= 10 and st.session_state.timer_running:
+            st.warning("⚠️ Less than 10 seconds remaining!")
+        
+        # Auto-stop when time is up
+        if remaining_time <= 0 and st.session_state.timer_running:
+            stop_timer()
+            st.error("Time's up! Please submit your answer sheet now!")
+    
+    # Auto-refresh every second to update the timer display only if the timer is still running
+    if st.session_state.timer_running:
+        st_autorefresh(interval=1000)
