@@ -2,6 +2,9 @@
 from pathlib import Path
 import time
 from streamlit_autorefresh import st_autorefresh
+from google.oauth2 import service_account
+from google.cloud import storage
+import mimetypes
 
 # Define the folder path where files will be saved
 save_folder = Path("files")  # Change if your folder path is different
@@ -49,6 +52,36 @@ def stop_timer():
     if st.session_state.elapsed_time >= st.session_state.exam_duration:
         st.session_state.time_up = True
 
+def initialize_gcs_client():
+    """Initialize Google Cloud Storage client with credentials from Streamlit secrets."""
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"]
+        )
+        return storage.Client(credentials=credentials)
+    except Exception as e:
+        st.error(f"Failed to initialize GCS client: {str(e)}")
+        return None
+
+def upload_to_gcs(file_data, file_name, folder_path=None):
+    """Upload a file to Google Cloud Storage."""
+    try:
+        bucket_name = st.secrets["gcs"]["bucket_name"]
+        client = initialize_gcs_client()
+        if client:
+            bucket = client.bucket(bucket_name)
+            blob_path = f"{folder_path}/{file_name}" if folder_path else file_name
+            blob = bucket.blob(blob_path)
+            content_type = mimetypes.guess_type(file_name)[0]
+            if content_type:
+                blob.content_type = content_type
+            blob.upload_from_file(file_data)
+            st.success(f"File '{file_name}' successfully uploaded to Google Cloud Storage.")
+            return True
+    except Exception as e:
+        st.error(f"Failed to upload file '{file_name}': {str(e)}")
+        return False
+
 # Page 1: Login Page
 if st.session_state["page"] == "login":
     st.title("Student Login")
@@ -73,19 +106,17 @@ if st.session_state["page"] == "login":
                 st.session_state["test"] = test_number
                 st.session_state["page"] = "main"
                 st.session_state.show_main = True
-                start_timer()
                 st.rerun()
 
-# Page 2: Main Page (display only if show_main is True)
+# Page 2: Main Page
 elif st.session_state.get("page") == "main" and st.session_state.show_main:
     st.title("Test Page")
     
     main_col, _, timer_col = st.columns([2, 1, 1])
     
     with main_col:
-        # Section 1: Question Paper Download
+        # Question Paper Download
         st.subheader("Download Question Paper")
-        
         question_path = save_folder / st.session_state["class"] / st.session_state["test"] / "QuestionPaper" / "QuestionPaper.pdf"
         if question_path.exists():
             if st.download_button(
@@ -95,10 +126,9 @@ elif st.session_state.get("page") == "main" and st.session_state.show_main:
                 mime="application/pdf",
                 disabled=st.session_state.download_question_clicked
             ):
-                st.session_state.download_question_clicked = True  # Disable after first click
-                if not st.session_state.question_downloaded:
-                    st.session_state.question_downloaded = True
-                    start_timer()
+                st.session_state.download_question_clicked = True
+                st.session_state.question_downloaded = True
+                start_timer()
         else:
             st.error("Question paper not available.")
 
@@ -109,44 +139,35 @@ elif st.session_state.get("page") == "main" and st.session_state.show_main:
             if st.session_state.timer_running:
                 stop_timer()
 
-        # Section 2: Answer Sheet Upload
+        # Answer Sheet Upload
         if not st.session_state.solution_downloaded:
             st.subheader("Upload Your Answer Sheet")
-            
-            # Disable upload if time is up OR solutions are downloaded
             upload_disabled = st.session_state.time_up or remaining_time <= 0 or st.session_state.upload_answer_clicked
-            
             uploaded_file = st.file_uploader(
-                "Choose a PDF file to upload your answer sheet", 
-                type="pdf", 
+                "Choose a PDF file to upload your answer sheet",
+                type="pdf",
                 key="answer_upload",
                 disabled=upload_disabled
             )
-            
-            # Show message if time is up
+    
             if upload_disabled and not st.session_state.answer_uploaded:
                 st.error("Time's up! Answer sheet uploads are no longer accepted.")
-            
-            if uploaded_file and not upload_disabled:
+            # Check to ensure only one upload occurs
+            if uploaded_file and not upload_disabled and not st.session_state.get("answer_uploaded", False):
                 student_name = st.session_state["name"].replace(" ", "_")
                 filename = f"{student_name}_{st.session_state['class']}.pdf"
-                answer_path = save_folder / st.session_state["class"] / st.session_state["test"] / "AnswerSheets" / filename
-                
-                # Save the file only if it doesn't already exist
-                if not answer_path.exists():
-                    with open(answer_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    st.success(f"Answer sheet uploaded successfully and saved as '{filename}'")
-                    stop_timer()
-                    st.session_state.answer_uploaded = True
-                    st.session_state.upload_answer_clicked = True  # Disable after first upload
-                else:
-                    st.error("You have already uploaded your answer sheet.")
+                folder_path = f"{st.session_state['class']}/{st.session_state['test']}/AnswerSheets"
+                if upload_to_gcs(uploaded_file, filename, folder_path):
+                    st.session_state.timer_running = False  # Explicitly stop timer
+                    st.session_state.elapsed_time = time.time() - st.session_state.start_time
+                    st.session_state.answer_uploaded = True  # Set the flag to prevent re-upload
+                    st.session_state.upload_answer_clicked = True
+                    st.session_state.page = "main"  # Ensure we stay on main page
+                    st.rerun()  # Force page refresh
 
-        # Section 3: Download Solutions
+        # Download Solutions
         if st.session_state.answer_uploaded:
             st.subheader("Download Solutions")
-            
             solution_path = save_folder / st.session_state["class"] / st.session_state["test"] / "Solutions" / "Solutions.pdf"
             if solution_path.exists():
                 if st.download_button(
@@ -158,21 +179,18 @@ elif st.session_state.get("page") == "main" and st.session_state.show_main:
                 ):
                     st.session_state.solution_downloaded = True
                     st.session_state.download_solution_clicked = True
-                    st.session_state["page"] = "thank_you"  # Change to thank you page
+                    st.session_state["page"] = "thank_you"
                     st.rerun()
 
     # Timer display
     if st.session_state.question_downloaded and not st.session_state.answer_uploaded and not st.session_state.solution_downloaded:
         with timer_col:
             st.subheader("Exam Timer")
-            
             if st.session_state.timer_running:
                 st.session_state.elapsed_time = time.time() - st.session_state.start_time
-            
             remaining_time = max(st.session_state.exam_duration - st.session_state.elapsed_time, 0)
             minutes = int(remaining_time // 60)
             seconds = int(remaining_time % 60)
-            
             time_str = f"{minutes:02d}:{seconds:02d}"
             if remaining_time <= 10:
                 st.markdown(f"<h2 style='color: red;'>⏱️ {time_str}</h2>", unsafe_allow_html=True)
@@ -180,16 +198,14 @@ elif st.session_state.get("page") == "main" and st.session_state.show_main:
                 st.markdown(f"<h2 style='color: orange;'>⏱️ {time_str}</h2>", unsafe_allow_html=True)
             else:
                 st.markdown(f"<h2>⏱️ {time_str}</h2>", unsafe_allow_html=True)
-            
             if remaining_time <= 10 and st.session_state.timer_running:
                 st.warning("⚠️ Less than 10 seconds remaining!")
-            
             if remaining_time <= 0 and st.session_state.timer_running:
                 stop_timer()
                 st.error("Time's up! Answer sheet uploads are no longer accepted.")
     
-    # Auto-refresh timer
-    if st.session_state.timer_running and not st.session_state.answer_uploaded:
+    # Timer refresh control
+    if st.session_state.timer_running and not st.session_state.answer_uploaded and not uploaded_file:
         st_autorefresh(interval=1000)
 
 # Page 3: Thank You Page

@@ -3,4 +3,4 @@
 *.vscode/
 *.DS_Store
 __pycache__/
-*.pyc
+*.pyc".streamlit/secrets.toml" 
