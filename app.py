@@ -18,7 +18,7 @@ if 'start_time' not in st.session_state:
 if 'elapsed_time' not in st.session_state:
     st.session_state.elapsed_time = 0
 if 'exam_duration' not in st.session_state:
-    st.session_state.exam_duration = 6000  # Set to 100 minutes in seconds 
+    st.session_state.exam_duration = 13  # Set to 100 minutes in seconds 
 if 'answer_uploaded' not in st.session_state:
     st.session_state.answer_uploaded = False
 if 'question_downloaded' not in st.session_state:
@@ -27,8 +27,6 @@ if 'solution_downloaded' not in st.session_state:
     st.session_state.solution_downloaded = False
 if 'time_up' not in st.session_state:
     st.session_state.time_up = False
-if 'show_main' not in st.session_state:
-    st.session_state.show_main = False  # Control when the main page appears
 
 # Track button clicks to disable after the first click
 if 'download_question_clicked' not in st.session_state:
@@ -76,140 +74,153 @@ def upload_to_gcs(file_data, file_name, folder_path=None):
             if content_type:
                 blob.content_type = content_type
             blob.upload_from_file(file_data)
-            st.success(f"File '{file_name}' successfully uploaded to Google Cloud Storage.")
             return True
     except Exception as e:
         st.error(f"Failed to upload file '{file_name}': {str(e)}")
         return False
 
-# Page 1: Login Page
+# Define navigation callbacks
+def handle_login_submit():
+    name = st.session_state.get("student_name", "")
+    email = st.session_state.get("student_email", "")
+    if not name:
+        st.error("Please enter your name")
+        return
+    if not email:
+        st.error("Please enter your email ID")
+        return
+    st.session_state["name"] = name
+    st.session_state["email"] = email
+    st.session_state["class"] = f"Grade{st.session_state.student_class}"
+    st.session_state["test"] = st.session_state.test_number
+    st.session_state["page"] = "download_questions"
+
+def handle_question_download():
+    st.session_state.download_question_clicked = True
+    st.session_state.question_downloaded = True
+    st.session_state["page"] = "upload_answer_sheet"
+
+def handle_answer_upload():
+    if not st.session_state.get("answer_upload"):
+        st.error("Please select a file to upload")
+        return False
+    
+    # First update states
+    stop_timer()
+    st.session_state.answer_uploaded = True
+    st.session_state.upload_answer_clicked = True
+    st.session_state["page"] = "thank_you"  # Set page before upload
+    
+    # Then upload file to GCS
+    file = st.session_state.answer_upload
+    student_name = st.session_state["name"].replace(" ", "_")
+    filename = f"{student_name}_{st.session_state['class']}.pdf"
+    folder_path = f"{st.session_state['class']}/{st.session_state['test']}/AnswerSheets"
+    
+    return upload_to_gcs(file, filename, folder_path)
+
+# Page 1: LOGIN Page
 if st.session_state["page"] == "login":
     st.title("Student Login")
-    with st.form("login_form"):
-        name = st.text_input("Student Name")
-        email = st.text_input("Email ID")
-        student_class = st.selectbox("Class", [9, 10, 11, 12])
-        test_number = st.selectbox("Test Number", ["Test1", "Test2", "Test3"])
-        
-        submit = st.form_submit_button("Submit")
-        if submit:
-            if not name:
-                st.error("Please enter your name")
-            if not email:
-                st.error("Please enter your email ID")
-            
-            # Only proceed if all required fields are filled
-            if name and email and student_class:
-                st.session_state["name"] = name
-                st.session_state["email"] = email
-                st.session_state["class"] = f"Grade{student_class}"
-                st.session_state["test"] = test_number
-                st.session_state["page"] = "main"
-                st.session_state.show_main = True
-                st.rerun()
+    with st.form("login_form", clear_on_submit=False):
+        st.text_input("Student Name", key="student_name")
+        st.text_input("Email ID", key="student_email")
+        st.selectbox("Class", [9, 10, 11, 12], key="student_class")
+        st.selectbox("Test Number", ["Test1", "Test2", "Test3"], key="test_number")
+        st.form_submit_button("Submit", on_click=handle_login_submit)
 
-# Page 2: Main Page
-elif st.session_state.get("page") == "main" and st.session_state.show_main:
-    st.title("Test Page")
+# Page 2: DOWNLOAD QUESTIONS Page
+elif st.session_state["page"] == "download_questions":
+    st.title("Download Questions")
+    st.subheader("Download Question Paper")
     
-    main_col, _, timer_col = st.columns([2, 1, 1])
-    
-    with main_col:
-        # Question Paper Download
-        st.subheader("Download Question Paper")
-        question_path = save_folder / st.session_state["class"] / st.session_state["test"] / "QuestionPaper" / "QuestionPaper.pdf"
-        if question_path.exists():
-            if st.download_button(
+    question_path = save_folder / st.session_state["class"] / st.session_state["test"] / "QuestionPaper" / "QuestionPaper.pdf"
+    if question_path.exists():
+        if not st.session_state.download_question_clicked:
+            st.download_button(
                 label="DOWNLOAD QUESTION PAPER",
                 data=question_path.read_bytes(),
                 file_name="QuestionPaper.pdf",
                 mime="application/pdf",
-                disabled=st.session_state.download_question_clicked
-            ):
-                st.session_state.download_question_clicked = True
-                st.session_state.question_downloaded = True
-                start_timer()
-        else:
-            st.error("Question paper not available.")
-
-        # Calculate remaining time outside the display block
-        remaining_time = max(st.session_state.exam_duration - st.session_state.elapsed_time, 0)
-        if remaining_time <= 0:
-            st.session_state.time_up = True
-            if st.session_state.timer_running:
-                stop_timer()
-
-        # Answer Sheet Upload
-        if not st.session_state.solution_downloaded:
-            st.subheader("Upload Your Answer Sheet")
-            upload_disabled = st.session_state.time_up or remaining_time <= 0 or st.session_state.upload_answer_clicked
-            uploaded_file = st.file_uploader(
-                "Choose a PDF file to upload your answer sheet",
-                type="pdf",
-                key="answer_upload",
-                disabled=upload_disabled
+                on_click=handle_question_download
             )
+    else:
+        st.error("Question paper not available.")
+
+# Page 3: UPLOAD ANSWER SHEET Page
+elif st.session_state["page"] == "upload_answer_sheet":
+    st.title("Upload Answer Sheet")
     
-            if upload_disabled and not st.session_state.answer_uploaded:
-                st.error("Time's up! Answer sheet uploads are no longer accepted.")
-            # Check to ensure only one upload occurs
-            if uploaded_file and not upload_disabled and not st.session_state.get("answer_uploaded", False):
-                student_name = st.session_state["name"].replace(" ", "_")
-                filename = f"{student_name}_{st.session_state['class']}.pdf"
-                folder_path = f"{st.session_state['class']}/{st.session_state['test']}/AnswerSheets"
-                if upload_to_gcs(uploaded_file, filename, folder_path):
-                    st.session_state.timer_running = False  # Explicitly stop timer
-                    st.session_state.elapsed_time = time.time() - st.session_state.start_time
-                    st.session_state.answer_uploaded = True  # Set the flag to prevent re-upload
-                    st.session_state.upload_answer_clicked = True
-                    st.session_state.page = "main"  # Ensure we stay on main page
-                    st.rerun()  # Force page refresh
-
-        # Download Solutions
-        if st.session_state.answer_uploaded:
-            st.subheader("Download Solutions")
-            solution_path = save_folder / st.session_state["class"] / st.session_state["test"] / "Solutions" / "Solutions.pdf"
-            if solution_path.exists():
-                if st.download_button(
-                    label="DOWNLOAD SOLUTIONS",
-                    data=solution_path.read_bytes(),
-                    file_name="Solutions.pdf",
-                    mime="application/pdf",
-                    disabled=st.session_state.download_solution_clicked
-                ):
-                    st.session_state.solution_downloaded = True
-                    st.session_state.download_solution_clicked = True
-                    st.session_state["page"] = "thank_you"
-                    st.rerun()
-
+    # Start the timer if not already started
+    if not st.session_state.timer_running:
+        start_timer()
+    
     # Timer display
-    if st.session_state.question_downloaded and not st.session_state.answer_uploaded and not st.session_state.solution_downloaded:
-        with timer_col:
-            st.subheader("Exam Timer")
-            if st.session_state.timer_running:
-                st.session_state.elapsed_time = time.time() - st.session_state.start_time
-            remaining_time = max(st.session_state.exam_duration - st.session_state.elapsed_time, 0)
-            minutes = int(remaining_time // 60)
-            seconds = int(remaining_time % 60)
-            time_str = f"{minutes:02d}:{seconds:02d}"
-            if remaining_time <= 10:
-                st.markdown(f"<h2 style='color: red;'>⏱️ {time_str}</h2>", unsafe_allow_html=True)
-            elif remaining_time <= 30:
-                st.markdown(f"<h2 style='color: orange;'>⏱️ {time_str}</h2>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<h2>⏱️ {time_str}</h2>", unsafe_allow_html=True)
-            if remaining_time <= 10 and st.session_state.timer_running:
-                st.warning("⚠️ Less than 10 seconds remaining!")
-            if remaining_time <= 0 and st.session_state.timer_running:
-                stop_timer()
-                st.error("Time's up! Answer sheet uploads are no longer accepted.")
+    if st.session_state.timer_running:
+        st.session_state.elapsed_time = time.time() - st.session_state.start_time
+    
+    remaining_time = max(st.session_state.exam_duration - st.session_state.elapsed_time, 0)
+    if remaining_time <= 0:
+        st.session_state.time_up = True
+        stop_timer()
+    
+    # Display the timer
+    minutes = int(remaining_time // 60)
+    seconds = int(remaining_time % 60)
+    time_str = f"{minutes:02d}:{seconds:02d}"
+    st.subheader(f"Time Remaining: ⏱️ {time_str}")
+    
+    # Upload form
+    upload_disabled = st.session_state.time_up or st.session_state.upload_answer_clicked
+    
+    uploaded_file = st.file_uploader(
+        "Choose a PDF file to upload your answer sheet",
+        type="pdf",
+        key="answer_upload",
+        disabled=upload_disabled
+    )
+    
+    if st.button("Submit Answer Sheet", disabled=upload_disabled):
+        if uploaded_file:
+            # First update all states
+            st.session_state.timer_running = False
+            stop_timer()
+            st.session_state.answer_uploaded = True
+            st.session_state.upload_answer_clicked = True
+            st.session_state["page"] = "thank_you"
+            
+            # Then perform the upload
+            student_name = st.session_state["name"].replace(" ", "_")
+            filename = f"{student_name}_{st.session_state['class']}.pdf"
+            folder_path = f"{st.session_state['class']}/{st.session_state['test']}/AnswerSheets"
+            
+            upload_to_gcs(uploaded_file, filename, folder_path)
+            # Force page transition immediately
+            st.rerun()
+        else:
+            st.error("Please select a file to upload")
     
     # Timer refresh control
-    if st.session_state.timer_running and not st.session_state.answer_uploaded and not uploaded_file:
-        st_autorefresh(interval=1000)
+    if st.session_state.timer_running and not st.session_state.answer_uploaded:
+        st_autorefresh(interval=1000, key="timer_refresh")
 
-# Page 3: Thank You Page
+# Page 4: THANK YOU Page
 elif st.session_state.get("page") == "thank_you":
     st.title("THANK YOU")
     st.header(f"Thank you {st.session_state['name']} for completing the test!")
-    st.success("Your answer sheet has been submitted and solutions have been downloaded successfully.")
+    st.success("Your answer sheet has been submitted successfully.")
+    
+    # Add solutions download button
+    st.subheader("Download Solutions")
+    solution_path = save_folder / st.session_state["class"] / st.session_state["test"] / "Solutions" / "Solutions.pdf"
+    if solution_path.exists():
+        if not st.session_state.download_solution_clicked:
+            if st.download_button(
+                label="DOWNLOAD SOLUTIONS",
+                data=solution_path.read_bytes(),
+                file_name="Solutions.pdf",
+                mime="application/pdf"
+            ):
+                st.session_state.solution_downloaded = True
+                st.session_state.download_solution_clicked = True
+                st.success("Solutions downloaded successfully!")
