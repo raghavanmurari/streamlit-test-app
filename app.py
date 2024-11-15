@@ -88,7 +88,7 @@ if st.session_state["page"] == "login":
     with st.form("login_form"):
         name = st.text_input("Student Name")
         email = st.text_input("Email ID")
-        student_class = st.selectbox("Class", [7, 8, 9, 10, 11, 12])
+        student_class = st.selectbox("Class", [9, 10, 11, 12])
         test_number = st.selectbox("Test Number", ["Test1", "Test2", "Test3"])
         
         submit = st.form_submit_button("Submit")
