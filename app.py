@@ -18,7 +18,7 @@ if 'start_time' not in st.session_state:
 if 'elapsed_time' not in st.session_state:
     st.session_state.elapsed_time = 0
 if 'exam_duration' not in st.session_state:
-    st.session_state.exam_duration = 13  # Set to 100 minutes in seconds 
+    st.session_state.exam_duration = 6000  # Set to 100 minutes in seconds 
 if 'answer_uploaded' not in st.session_state:
     st.session_state.answer_uploaded = False
 if 'question_downloaded' not in st.session_state:
