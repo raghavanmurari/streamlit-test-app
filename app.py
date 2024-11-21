@@ -18,7 +18,7 @@ if 'start_time' not in st.session_state:
 if 'elapsed_time' not in st.session_state:
     st.session_state.elapsed_time = 0
 if 'exam_duration' not in st.session_state:
-    st.session_state.exam_duration = 20  # Set to 1 minute in seconds for demonstration
+    st.session_state.exam_duration = 5400  # Set to 1 minute in seconds for demonstration
 if 'answer_uploaded' not in st.session_state:
     st.session_state.answer_uploaded = False
 if 'question_downloaded' not in st.session_state:
@@ -118,7 +118,10 @@ elif st.session_state.get("page") == "main" and st.session_state.show_main:
         # Question Paper Download
         st.subheader("Download Question Paper")
         question_path = save_folder / st.session_state["class"] / st.session_state["test"] / "QuestionPaper" / "QuestionPaper.pdf"
+ 
         if question_path.exists():
+            
+
             if st.download_button(
                 label="DOWNLOAD QUESTION PAPER",
                 data=question_path.read_bytes(),
