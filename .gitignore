@@ -1,5 +1,14 @@
+<<<<<<< HEAD
 "files/" 
 "my_test_app_clean/" 
 "*.pdf" 
 "__pycache__/" 
 ".streamlit/" 
+=======
+lunar-analyzer-441615-p7-6905995e6006.json 
+# Ignore Streamlit configuration files
+.streamlit/
+
+# Ignore answer sheet files
+files/Grade10/Test1/AnswerSheets/
+>>>>>>> adc7f0058ba698857ee5cba721ab29ec382cb983
