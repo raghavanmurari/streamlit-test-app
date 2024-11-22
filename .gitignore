@@ -1,8 +1,5 @@
-.vs/
-*.vsidx
-*.vscode/
-*.DS_Store
-__pycache__/
-*.pyc".streamlit/secrets.toml" 
-"my_test_app_clean/" 
 "files/" 
+"my_test_app_clean/" 
+"*.pdf" 
+"__pycache__/" 
+".streamlit/" 
